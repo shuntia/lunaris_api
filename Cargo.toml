@@ -1,0 +1,20 @@
+[package]
+name = "lunaris_api"
+version = "0.0.0"
+edition = "2024"
+description = "The API for lunaris. Reservation for lunaris."
+readme = "README.md"
+homepage = "https://github.com/shuntia/lunaris_api"
+repository = "https://github.com/shuntia/lunaris_api"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+bevy_ecs.workspace = true
+egui.workspace = true
+egui_dock.workspace = true
+once_cell.workspace = true
+parking_lot.workspace = true
+slab.workspace = true
+thiserror.workspace = true
+wgpu.workspace = true
+
