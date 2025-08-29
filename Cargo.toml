@@ -11,10 +11,10 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 bevy_ecs.workspace = true
 egui.workspace = true
-egui_dock.workspace = true
 once_cell.workspace = true
 parking_lot.workspace = true
 slab.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["full", "tracing"] }
 wgpu.workspace = true
 

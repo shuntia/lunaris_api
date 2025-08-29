@@ -14,9 +14,9 @@ pub enum LunarisError {
     #[error("Unknown error occurred: {context:?}")]
     Unknown { context: Option<String> },
 
-    /// Tried to use feature that was not implemented.
-    #[error("Feature not implemented: {feature}")]
-    NotImplemented { feature: &'static str },
+    /// Tried to use feature that was not supported.
+    #[error("Feature not supported by plugin: {feature}")]
+    Unsupported { feature: &'static str },
 
     /// Tried  to invoke a command with wrong arguments.
     #[error("Invalid argument: {name} - {reason:?}")]
@@ -90,7 +90,7 @@ pub enum LunarisError {
     #[error("Kernel initialization failed: {reason}")]
     KernelInitFailed { reason: String },
 
-    /// Kernel internally paniced. Not a plugin's fault(probably)
+    /// Kernel internally panicked. Not a plugin's fault(probably)
     #[error("Kernel panic: {reason}")]
     KernelPanic { reason: String },
 

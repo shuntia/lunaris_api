@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct RawImage {
     pub size: (usize, usize),
     pub frame: Vec<u8>,

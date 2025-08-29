@@ -1,25 +1,25 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use crate::{render::RawImage, timeline::TimelineSpan, utils::errors::Result};
 
 use bevy_ecs::{component::Component, entity::Entity};
-use once_cell::sync::OnceCell;
 
-use crate::{
-    render::RawImage,
-    timeline::TimelineSpan,
-    utils::errors::{LunarisError, Result},
-};
-
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct TimelineElement {
     /// Track number of Timeline Element, or in other words, the Z-index.
     pub track_num: u64,
     pub position: TimelineSpan,
 }
 
-#[derive(Component, Default)]
+#[derive(Component, Debug)]
+pub struct BindTo {
+    pub id: Entity,
+}
+
+#[derive(Component, Default, Debug)]
 pub struct Properties {
     pub properties: HashMap<String, Property>,
-    checker: OnceCell<fn(HashMap<String, Property>) -> Vec<(String, LunarisError)>>,
 }
 
 impl Properties {
@@ -34,14 +34,12 @@ impl Into<HashMap<String, Property>> for Properties {
     }
 }
 
-/// Trait for
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct Renderable {
-    pub previous_frame: Option<RawImage>,
     pub render_result: Result<RawImage>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Property {
     String(String),
     Integer(u64),
