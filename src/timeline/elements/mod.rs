@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::{render::RawImage, timeline::TimelineSpan, utils::errors::Result};
+use crate::{render::RawImage, timeline::TimelineSpan, util::error::Result};
 
 use bevy_ecs::{component::Component, entity::Entity};
 

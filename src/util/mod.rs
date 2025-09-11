@@ -1,4 +1,4 @@
-pub mod errors;
+pub mod error;
 
 pub enum PositionVertical {
     Top,

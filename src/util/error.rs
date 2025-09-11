@@ -1,8 +1,9 @@
 use std::error::Error;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use fluent::FluentError;
 use thiserror::Error;
 
 pub type NResult = core::result::Result<(), LunarisError>;
@@ -123,9 +124,20 @@ pub enum LunarisError {
     #[error("Render queue is full")]
     RenderQueueFull,
 
+    #[error(
+        "Tried to add frames of different size: {a:?} and {b:?}. NOTE: use the universal frame size."
+    )]
+    Dimensionmismatch {
+        a: (usize, usize),
+        b: (usize, usize),
+    },
+
     /// Took too much time to render.
     #[error("Render timeout during: {stage}")]
     RenderTimeout { stage: &'static str },
+
+    #[error("Plugin doesn not support feature: {feature}")]
+    PluginFeatureUnsupported { feature: &'static str },
 
     #[error("Could not find plugin with name: {name}")]
     PluginNameNotFound { name: String },
@@ -181,6 +193,10 @@ pub enum LunarisError {
     #[error("Audio stream error: {reason}")]
     AudioStreamError { reason: String },
 
+    // i18n(fluent) error
+    #[error("Fluent failed: {0}")]
+    FluentError(#[from] FluentErrorWrapper),
+
     // Dynamic plugin error wrapping
     #[error("Plugin {id} returned an error: {source:?}")]
     PluginError {
@@ -188,4 +204,22 @@ pub enum LunarisError {
         #[source]
         source: Arc<dyn Error + Send + Sync>,
     },
+}
+
+#[derive(Debug, Error)]
+#[repr(transparent)]
+pub struct FluentErrorWrapper {
+    inner: Vec<FluentError>,
+}
+
+impl Display for FluentErrorWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl From<Vec<FluentError>> for FluentErrorWrapper {
+    fn from(value: Vec<FluentError>) -> Self {
+        Self { inner: value }
+    }
 }
