@@ -12,8 +12,10 @@ license = "MIT OR Apache-2.0"
 bevy_ecs.workspace = true
 egui.workspace = true
 fluent.workspace = true
+futures.workspace = true
+inventory.workspace = true
+parking_lot = "0.12"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full", "tracing"] }
 wgpu.workspace = true
-inventory.workspace = true
-futures.workspace = true
+

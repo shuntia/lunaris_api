@@ -28,9 +28,9 @@ impl Properties {
     }
 }
 
-impl Into<HashMap<String, Property>> for Properties {
-    fn into(self) -> HashMap<String, Property> {
-        self.properties
+impl From<Properties> for HashMap<String, Property> {
+    fn from(val: Properties) -> Self {
+        val.properties
     }
 }
 

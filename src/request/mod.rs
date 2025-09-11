@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
-use tokio::sync::oneshot;
 use futures::future::BoxFuture;
+use tokio::sync::oneshot;
 
 use crate::util::error::NResult;
 
@@ -99,21 +99,12 @@ impl DerefMut for JobHandle {
         &mut self.oneshot
     }
 }
-
-pub trait OrchestratorHandle {
-    /// Submit synchronous, CPU-bound job to the orchestrator
-    fn submit_job<T: FnOnce() + Send + 'static>(&self, job: Job<T>) -> NResult;
-    /// Submit asynchronous, IO-bound job to the orchestrator
-    fn submit_async<F, Fut>(&self, job: AsyncJob<F, Fut>) -> NResult
-    where
-        F: FnOnce() -> Fut + Send + 'static,
-        Fut: core::future::Future<Output = ()> + Send + 'static;
-    fn join_foreground(&self) -> NResult;
-    /// Not reccomended. bg threads don't have an obligation to join.
-    #[deprecated]
-    fn join_all(&self) -> NResult;
-    /// reconfigure amount of threads available at runtime
-    fn set_threads(&self, default: usize, frame: usize, background: usize);
+pub struct OrchestratorProfile {
+    pub immediate: u64,
+    pub normal: u64,
+    pub deferred: u64,
+    pub frame: u64,
+    pub running_tasks: u64,
 }
 
 /// Object-safe orchestrator for plugins via dyn context.
@@ -123,11 +114,8 @@ pub trait DynOrchestrator: Send + Sync {
         job: Box<dyn FnOnce() + Send + 'static>,
         priority: Priority,
     ) -> NResult;
-    fn submit_async_boxed(
-        &self,
-        fut: BoxFuture<'static, ()>,
-        priority: Priority,
-    ) -> NResult;
+    fn submit_async_boxed(&self, fut: BoxFuture<'static, ()>, priority: Priority) -> NResult;
     fn join_foreground(&self) -> NResult;
     fn set_threads(&self, default: usize, frame: usize, background: usize);
+    fn profile(&self) -> OrchestratorProfile;
 }
