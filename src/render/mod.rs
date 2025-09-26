@@ -1,27 +1,41 @@
+use std::sync::OnceLock;
+
+use wgpu::{Device, Queue};
+
 use crate::prelude::*;
 
-#[derive(Debug)]
-pub struct RawImage {
-    pub size: (usize, usize),
-    pub frame: Vec<u8>,
+pub mod cache;
+pub mod image;
+
+pub use image::{PixelFormat, RawImage, RenderResult};
+
+pub static DEVICE: OnceLock<Device> = OnceLock::new();
+pub static QUEUE: OnceLock<Queue> = OnceLock::new();
+
+/// Register the globally shared GPU handles. Must be called once by the host
+/// during startup before any render helpers are used.
+pub fn init_gpu(device: Device, queue: Queue) -> Result {
+    if DEVICE.set(device).is_err() {
+        return Err(LunarisError::AlreadyExists {
+            item: "wgpu device".to_string(),
+        });
+    }
+
+    if QUEUE.set(queue).is_err() {
+        return Err(LunarisError::AlreadyExists {
+            item: "wgpu queue".to_string(),
+        });
+    }
+
+    Ok(())
 }
 
-impl RawImage {
-    pub fn is_valid(&self) -> bool {
-        self.frame.len() == self.size.0 * self.size.1
-    }
-    pub fn overlay(mut self, other: RawImage) -> Result<Self> {
-        if self.size != other.size {
-            Err(LunarisError::Dimensionmismatch {
-                a: self.size,
-                b: other.size,
-            })
-        } else {
-            self.frame
-                .iter_mut()
-                .zip(other.frame.iter())
-                .for_each(|(a, b)| *a = a.saturating_add(*b));
-            Ok(self)
-        }
-    }
+/// Clone the global device handle. Panics if [`init_gpu`] has not been called.
+pub fn device() -> &'static Device {
+    DEVICE.get().expect("GPU device not initialized")
+}
+
+/// Clone the global queue handle. Panics if [`init_gpu`] has not been called.
+pub fn queue() -> &'static Queue {
+    QUEUE.get().expect("GPU queue not initialized")
 }

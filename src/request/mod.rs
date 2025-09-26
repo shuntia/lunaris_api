@@ -3,13 +3,108 @@ use std::ops::{Deref, DerefMut};
 use futures::future::BoxFuture;
 use tokio::sync::oneshot;
 
-use crate::util::error::NResult;
+use crate::util::error::Result;
 
 /// A synchronous, CPU-bound job.
 /// Preferrably short-lived.
 pub struct Job<F: FnOnce() + Send + 'static> {
     pub inner: F,
     pub priority: Priority,
+}
+
+/// A helper struct to compose a Job.
+pub struct OneshotJob<I, O, F>
+where
+    I: Send + 'static,
+    O: Send + 'static,
+    F: FnOnce(I) -> O + Send + 'static,
+{
+    pub param: Option<I>,
+    pub oneshot: oneshot::Sender<O>,
+    pub op: Option<F>,
+    pub priority: Priority,
+}
+
+pub struct OneshotJobHandle<O>
+where
+    O: Send + 'static,
+{
+    pub oneshot: oneshot::Receiver<O>,
+}
+
+impl<O> OneshotJobHandle<O>
+where
+    O: Send + 'static,
+{
+    pub fn new(o: oneshot::Receiver<O>) -> Self {
+        Self { oneshot: o }
+    }
+}
+
+impl<O: Send + 'static> Deref for OneshotJobHandle<O> {
+    type Target = oneshot::Receiver<O>;
+    fn deref(&self) -> &Self::Target {
+        &self.oneshot
+    }
+}
+
+impl<O: Send + 'static> DerefMut for OneshotJobHandle<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.oneshot
+    }
+}
+
+impl<I, O, F> OneshotJob<I, O, F>
+where
+    I: Send,
+    O: Send,
+    F: FnOnce(I) -> O + Send + 'static,
+{
+    pub fn from_params(args: I, f: F, oneshot: oneshot::Sender<O>) -> Self {
+        OneshotJob {
+            param: Some(args),
+            oneshot,
+            op: Some(f),
+            priority: Priority::Normal,
+        }
+    }
+    pub fn with_sender(args: I, f: F, oneshot: oneshot::Sender<O>, priority: Priority) -> Self {
+        OneshotJob {
+            param: Some(args),
+            oneshot,
+            op: Some(f),
+            priority,
+        }
+    }
+    pub fn new(i: I, f: F, priority: Priority) -> (OneshotJob<I, O, F>, OneshotJobHandle<O>) {
+        let (sender, receiver) = oneshot::channel();
+        (
+            Self::with_sender(i, f, sender, priority),
+            OneshotJobHandle::new(receiver),
+        )
+    }
+    pub fn exec(self) {
+        if let Some(s) = self.op
+            && let Some(p) = self.param
+        {
+            let _ = self.oneshot.send((s)(p));
+        }
+    }
+}
+
+impl<I, O, F> From<OneshotJob<I, O, F>> for Job<Box<dyn FnOnce() + Send + 'static>>
+where
+    I: Send + 'static,
+    O: Send + 'static,
+    F: FnOnce(I) -> O + Send + 'static,
+{
+    fn from(value: OneshotJob<I, O, F>) -> Self {
+        let priority = value.priority;
+        Job {
+            inner: Box::new(|| value.exec()),
+            priority,
+        }
+    }
 }
 
 /// An Asynchronous job, which is most beneficial for background tasks.
@@ -36,10 +131,13 @@ where
             _phantom: core::marker::PhantomData,
         }
     }
+
+    #[inline(always)]
     pub fn with_priority(mut self, priority: Priority) -> Self {
         self.priority = priority;
         self
     }
+
     pub async fn exec(self) {
         (self.inner)().await
     }
@@ -72,13 +170,22 @@ impl<F: FnOnce() + Send + 'static> Job<F> {
             priority: Priority::Normal,
         }
     }
+
+    #[inline(always)]
     pub fn with_priority(mut self, priority: Priority) -> Self {
         self.priority = priority;
         self
     }
+
+    #[inline(always)]
     pub fn exec(self) {
         (self.inner)()
     }
+}
+
+#[repr(transparent)]
+pub struct ParamJobHandle<T> {
+    oneshot: oneshot::Receiver<T>,
 }
 
 /// Job handle that completes whenever a task is completed.
@@ -113,9 +220,9 @@ pub trait DynOrchestrator: Send + Sync {
         &self,
         job: Box<dyn FnOnce() + Send + 'static>,
         priority: Priority,
-    ) -> NResult;
-    fn submit_async_boxed(&self, fut: BoxFuture<'static, ()>, priority: Priority) -> NResult;
-    fn join_foreground(&self) -> NResult;
+    ) -> Result;
+    fn submit_async_boxed(&self, fut: BoxFuture<'static, ()>, priority: Priority) -> Result;
+    fn join_foreground(&self) -> Result;
     fn set_threads(&self, default: usize, frame: usize, background: usize);
     fn profile(&self) -> OrchestratorProfile;
 }

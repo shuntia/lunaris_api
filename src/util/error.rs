@@ -6,18 +6,13 @@ use std::sync::Arc;
 use fluent::FluentError;
 use thiserror::Error;
 
-pub type NResult = core::result::Result<(), LunarisError>;
-pub type Result<T> = core::result::Result<T, LunarisError>;
+pub type Result<T = ()> = core::result::Result<T, LunarisError>;
 #[derive(Debug, Error)]
 pub enum LunarisError {
     /// Generic error.
     /// Refrain from using as much as possible.
     #[error("Unknown error occurred: {context:?}")]
     Unknown { context: Option<String> },
-
-    /// Tried to use feature that was not supported.
-    #[error("Feature not supported by plugin: {feature}")]
-    Unsupported { feature: &'static str },
 
     /// Tried  to invoke a command with wrong arguments.
     #[error("Invalid argument: {name} - {reason:?}")]
@@ -36,11 +31,6 @@ pub enum LunarisError {
     /// Resource not initialized yet.
     #[error("Tried to access resource which was not initialized: {resource}")]
     Uninit { resource: String },
-
-    /// Found a null pointer.
-    /// This is pretty bad.
-    #[error("Null pointer at {location}")]
-    NullPointer { location: &'static str },
 
     /// Out of memory. Self-explanatory.
     #[error("Out of memory")]
@@ -73,14 +63,6 @@ pub enum LunarisError {
     /// Tried to find resource from somewhere but failed.
     #[error("Item not found: {item}")]
     NotFound { item: String },
-
-    /// Envelope failed to send.
-    #[error("Invalid envelope, expected: {expected}")]
-    InvalidEnvelope { expected: String },
-
-    /// Message size was too large to hold. Maybe try to split it up.
-    #[error("Message too large: {size} bytes")]
-    MessageTooLarge { size: usize },
 
     /// Failed to find destination for envelope.
     #[error("Invalid destination ID: {id}")]
@@ -164,6 +146,12 @@ pub enum LunarisError {
     #[error("File corrupted: {path:?}")]
     FileCorrupted { path: PathBuf },
 
+    #[error("Failed to load file as lunaris save file: {reason}")]
+    FailedSaveLoad { reason: String },
+
+    #[error("Failed to migrate old save file: {reason}")]
+    FailedSaveMigration { reason: String },
+
     #[error("Invalid path: {reason}")]
     InvalidPath { reason: String },
 
@@ -183,19 +171,21 @@ pub enum LunarisError {
     #[error("Resource unavailable: {name}")]
     ResourceUnavailable { name: String },
 
-    // Audio / MIDI backend
-    #[error("Audio initialization failed: {reason}")]
-    AudioInitFailed { reason: String },
-
-    #[error("Audio device unavailable: {name:?}")]
-    AudioDeviceUnavailable { name: Option<String> },
-
+    /// Something failed on the Audio stream
     #[error("Audio stream error: {reason}")]
     AudioStreamError { reason: String },
 
     // i18n(fluent) error
     #[error("Fluent failed: {0}")]
     FluentError(#[from] FluentErrorWrapper),
+
+    /// Compression Error
+    #[error("Failed to compress: {what}")]
+    FailedCompress { what: String },
+
+    /// Decompression Error
+    #[error("Failed to decompress: {what}")]
+    FailedDecompress { what: String },
 
     // Dynamic plugin error wrapping
     #[error("Plugin {id} returned an error: {source:?}")]

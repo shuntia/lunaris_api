@@ -9,13 +9,22 @@ repository = "https://github.com/shuntia/lunaris_api"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+arc-swap = "1.7.1"
 bevy_ecs.workspace = true
 egui.workspace = true
 fluent.workspace = true
 futures.workspace = true
 inventory.workspace = true
+new_debug_unreachable = "1.0.6"
 parking_lot = "0.12"
+ringbuffer = "0.16.0"
+serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full", "tracing"] }
 wgpu.workspace = true
+tracing.workspace=true
+dashmap = "6.1.0"
+zstd = "0.13.3"
+qoi = "0.4.1"
+lz4_flex = "0.11.5"
 
