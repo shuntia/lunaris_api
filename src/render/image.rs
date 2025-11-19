@@ -417,7 +417,10 @@ fn read_texture_into_raw(texture: &Texture) -> Result<RawImage> {
     });
 
     super::device()
-        .poll(PollType::Wait { submission_index: Some(submission_index), timeout: None })
+        .poll(PollType::Wait {
+            submission_index: Some(submission_index),
+            timeout: None,
+        })
         .expect("failed to poll device for texture readback");
     receiver
         .recv()

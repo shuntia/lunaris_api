@@ -8,7 +8,7 @@ use std::{
 
 use crate::{render::RawImage, timeline::TimelineSpan, util::error::Result};
 
-use lunaris_ecs::{bevy_ecs, Component, Entity};
+use lunaris_ecs::{Component, Entity, bevy_ecs};
 
 #[derive(Component, Debug)]
 pub struct TimelineElement {

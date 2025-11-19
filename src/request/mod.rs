@@ -143,24 +143,19 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum Priority {
     /// Immediately launch task. Orchestrator pops this first as soon as possible.
     Immediate,
     /// Blocks the generation of current frame until this task is complete
     VideoFrame,
     /// Normal priority. Will execute task whenever other tasks are open.
+    #[default]
     Normal,
     /// Deferred execution. Lowest priority.
     Deferred,
     /// Background execution. Will run regardless of contention.
     Background,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 impl<F: FnOnce() + Send + 'static> Job<F> {

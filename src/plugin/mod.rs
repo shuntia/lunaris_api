@@ -4,7 +4,7 @@ use futures::future::BoxFuture;
 pub use lunaris_ecs::Schedule;
 use lunaris_ecs::{BoxedSystem, System, prelude::*};
 use serde::{Deserialize, Serialize};
-use std::{any::Any, collections::HashMap, sync::Arc};
+use std::{any::Any, sync::Arc};
 
 use crate::{
     render::RawImage,
@@ -14,7 +14,7 @@ use crate::{
 };
 
 pub mod ui;
-pub use ui::{UiContext, ArcSwapStorage, RwLockStorage};
+pub use ui::{ArcSwapStorage, RwLockStorage, UiContext};
 
 // --- Plugin ID and UI State Traits ---
 
