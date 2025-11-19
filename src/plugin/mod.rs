@@ -1,9 +1,10 @@
-use bevy_ecs::{prelude::*, system::BoxedSystem};
 use debug_unreachable::debug_unreachable;
 use egui::{MenuBar, Ui};
 use futures::future::BoxFuture;
+pub use lunaris_ecs::Schedule;
+use lunaris_ecs::{BoxedSystem, System, prelude::*};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{any::Any, collections::HashMap, sync::Arc};
 
 use crate::{
     render::RawImage,
@@ -13,6 +14,33 @@ use crate::{
 };
 
 pub mod ui;
+pub use ui::{UiContext, ArcSwapStorage, RwLockStorage};
+
+// --- Plugin ID and UI State Traits ---
+
+pub type PluginId = usize;
+
+/// Trait for plugin-defined UI state that can be sent across threads and downcast.
+pub trait UiState: Send + Sync + 'static {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
+}
+
+// Blanket implementation to allow any `T: Any + Send + Sync` to be used as `UiState`
+impl<T: Any + Send + Sync + 'static> UiState for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
+// --- Core Plugin Traits ---
 
 // Object-safe plugin surface that the host can store behind dyn.
 pub trait Plugin: Send + Sync {
@@ -21,6 +49,7 @@ pub trait Plugin: Send + Sync {
         Self: Sized;
     fn name(&self) -> &'static str;
     fn init(&self, ctx: PluginContext<'_>) -> Result;
+    fn add_schedule(&self, schedule: &mut Schedule) -> Result;
     fn update_world(&mut self, ctx: PluginContext<'_>) -> Result;
     fn report(&self, ctx: PluginContext<'_>) -> PluginReport;
     fn shutdown(&mut self, ctx: PluginContext<'_>);
@@ -71,7 +100,6 @@ pub trait Renderer: Plugin {
     fn schedule_render(&self, job: RenderJob) -> Result<RenderTask>;
 }
 
-// Optional GUI capability; separate trait keeps core Plugin object-safe.
 pub trait Gui: Plugin {
     fn ui(&self, ui: &mut Ui, ctx: PluginContext<'_>);
 }
@@ -79,8 +107,6 @@ pub trait Gui: Plugin {
 pub trait Skeleton: Gui {
     fn skeleton(ui: &mut Ui);
 }
-
-pub type PluginGui = dyn Gui;
 
 pub enum PluginReport {
     Uninit,
@@ -91,13 +117,13 @@ pub enum PluginReport {
 }
 
 pub struct PluginContext<'a> {
-    pub world: &'a mut World,
     pub orch: &'a dyn DynOrchestrator,
+    pub world: &'a mut World,
 }
 
 // Registration records collected via `inventory`.
 pub struct PluginRegistration {
-    pub name: &'static str,
+    pub id: &'static str,
     pub build: fn() -> Box<dyn Plugin>,
 }
 
@@ -169,6 +195,13 @@ impl<T: Plugin> Plugin for __ArcPluginAdapter<T> {
         let guard = self.inner.read();
         Plugin::init(&*guard, ctx)
     }
+    fn add_schedule(&self, schedule: &mut Schedule) -> Result {
+        if let Some(guard) = self.inner.try_read() {
+            Plugin::add_schedule(&*guard, schedule)
+        } else {
+            Ok(())
+        }
+    }
     fn update_world(&mut self, ctx: PluginContext<'_>) -> Result {
         let mut guard = self.inner.write();
         Plugin::update_world(&mut *guard, ctx)
@@ -226,6 +259,13 @@ impl<T: Plugin> Plugin for __ArcPluginGuiAdapter<T> {
         let guard = self.inner.read();
         Plugin::init(&*guard, ctx)
     }
+    fn add_schedule(&self, schedule: &mut Schedule) -> Result {
+        if let Some(guard) = self.inner.try_read() {
+            Plugin::add_schedule(&*guard, schedule)
+        } else {
+            Ok(())
+        }
+    }
     fn update_world(&mut self, ctx: PluginContext<'_>) -> Result {
         let mut guard = self.inner.write();
         Plugin::update_world(&mut *guard, ctx)
@@ -258,6 +298,58 @@ impl<T: Plugin + Gui> Gui for __ArcPluginGuiAdapter<T> {
             Gui::ui(&*guard, ui, ctx)
         } else {
             // Skip UI this frame if locked by a writer
+        }
+    }
+}
+
+#[doc(hidden)]
+pub struct __GuiTypeEraser<T> {
+    inner: __ArcPluginGuiAdapter<T>,
+}
+
+impl<T> __GuiTypeEraser<T> {
+    pub fn new(inner: __ArcPluginGuiAdapter<T>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<T: Plugin> Plugin for __GuiTypeEraser<T> {
+    fn new() -> Self
+    where
+        Self: Sized,
+    {
+        unsafe { debug_unreachable!("__GuiTypeEraser is constructed via export_plugin! macro") }
+    }
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+    fn init(&self, ctx: PluginContext<'_>) -> Result {
+        self.inner.init(ctx)
+    }
+    fn add_schedule(&self, schedule: &mut Schedule) -> Result {
+        self.inner.add_schedule(schedule)
+    }
+    fn update_world(&mut self, ctx: PluginContext<'_>) -> Result {
+        self.inner.update_world(ctx)
+    }
+    fn report(&self, ctx: PluginContext<'_>) -> PluginReport {
+        self.inner.report(ctx)
+    }
+    fn shutdown(&mut self, ctx: PluginContext<'_>) {
+        self.inner.shutdown(ctx)
+    }
+    fn reset(&mut self, ctx: PluginContext<'_>) {
+        self.inner.reset(ctx)
+    }
+    fn register_menu(&self, menu_bar: &mut MenuBar) {
+        self.inner.register_menu(menu_bar)
+    }
+}
+
+impl<T: Plugin + Gui> Gui for __GuiTypeEraser<T> {
+    fn ui(&self, ui: &mut Ui, ctx: PluginContext<'_>) {
+        if let Some(guard) = self.inner.inner.try_read() {
+            Gui::ui(&*guard, ui, ctx)
         }
     }
 }
@@ -296,6 +388,14 @@ impl<T: Plugin + Renderer> Plugin for __ArcPluginRendererAdapter<T> {
     fn init(&self, ctx: PluginContext<'_>) -> Result {
         let guard = self.inner.read();
         Plugin::init(&*guard, ctx)
+    }
+
+    fn add_schedule(&self, schedule: &mut Schedule) -> Result {
+        if let Some(guard) = self.inner.try_read() {
+            Plugin::add_schedule(&*guard, schedule)
+        } else {
+            Ok(())
+        }
     }
 
     fn update_world(&mut self, ctx: PluginContext<'_>) -> Result {
@@ -348,7 +448,7 @@ macro_rules! __map_feat_str {
         compile_error!(concat!(
             "Unknown plugin feature string in register_plugin!: ",
             $other,
-            ". Supported: \"Gui\", \"Renderer\""
+            ". Supported: "Gui", "Renderer""
         ));
     };
 }
@@ -361,14 +461,14 @@ macro_rules! __map_feat_str {
 /// Usage:
 ///   export_plugin!(MyType);                          // plugin only
 ///   export_plugin!(MyType, [Gui]);                   // plugin + Gui
-///   export_plugin!(MyType, name: "Nice Name");      // custom name
-///   export_plugin!(MyType, name: "Nice", [Gui]);    // custom + features
+///   export_plugin!(MyType, id: "com.example.plugin");   // custom ID
+///   export_plugin!(MyType, id: "com.example.plugin", [Gui]);    // custom ID + features
 #[macro_export]
 macro_rules! export_plugin {
     ($ty:ty) => {
-        $crate::export_plugin!($ty, name: stringify!($ty), [ ]);
+        $crate::export_plugin!($ty, id: stringify!($ty), []);
     };
-    ($ty:ty, name: $name:expr, [ $($feat:ident),* $(,)? ]) => {
+    ($ty:ty, id: $id:expr, [ $($feat:ident),* $(,)? ]) => {
         // Shared instance initializer
         fn __lunaris_shared_instance() -> std::sync::Arc<$crate::parking_lot::RwLock<$ty>> {
             static INSTANCE: std::sync::OnceLock<std::sync::Arc<$crate::parking_lot::RwLock<$ty>>> =
@@ -385,19 +485,19 @@ macro_rules! export_plugin {
         };
         $crate::submit_raw! {
             $crate::plugin::PluginRegistration {
-                name: $name,
+                id: $id,
                 build: || Box::new($crate::plugin::__ArcPluginAdapter::<$ty>::new_with_shared(__lunaris_shared_instance())) ,
             }
         }
         $(
-            $crate::__private_export_feature!($ty, $name, __lunaris_shared_instance, $feat);
+            $crate::__private_export_feature!($ty, $id, __lunaris_shared_instance, $feat);
         )*
     };
     ($ty:ty, [ $($feat:ident),* $(,)? ]) => {
-        $crate::export_plugin!($ty, name: stringify!($ty), [ $($feat),* ]);
+        $crate::export_plugin!($ty, id: stringify!($ty), [ $($feat),* ]);
     };
-    ($ty:ty, name: $name:expr) => {
-        $crate::export_plugin!($ty, name: $name, [ ]);
+    ($ty:ty, id: $id:expr) => {
+        $crate::export_plugin!($ty, id: $id, []);
     };
 }
 
@@ -412,7 +512,7 @@ macro_rules! __private_export_feature {
         $crate::submit_raw! {
             $crate::plugin::GuiRegistration {
                 name: $name,
-                build: || Box::new($crate::plugin::__ArcPluginGuiAdapter::<$ty>::new_with_shared($shared())),
+                build: || Box::new($crate::plugin::__GuiTypeEraser::new($crate::plugin::__ArcPluginGuiAdapter::<$ty>::new_with_shared($shared()))),
             }
         }
     };
@@ -424,7 +524,7 @@ macro_rules! __private_export_feature {
         $crate::submit_raw! {
             $crate::plugin::GuiRegistration {
                 name: $name,
-                build: || Box::new($crate::plugin::__ArcPluginGuiAdapter::<$ty>::new_with_shared($shared())),
+                build: || Box::new($crate::plugin::__GuiTypeEraser::new($crate::plugin::__ArcPluginGuiAdapter::<$ty>::new_with_shared($shared()))),
             }
         }
     };

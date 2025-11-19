@@ -4,7 +4,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
-use bevy_ecs::entity::Entity;
+use lunaris_ecs::Entity;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use tokio::time::Instant;
@@ -30,6 +30,16 @@ pub struct TieredCache {
 static COMPRESSION_STRATEGY: RwLock<CompressionStrategy> = RwLock::new(CompressionStrategy::Qoi);
 
 impl TieredCache {
+    pub fn insert_tex(&self, k: Entity, v: Texture) -> Option<Texture> {
+        if self.high.contains_key(&k) {
+            Some(v)
+        } else if let Some((_, b)) = self.high.insert(k, (AccessToken::default(), v)) {
+            warn!("Failed to insert value to render Dashmap! This should not happen.");
+            Some(b)
+        } else {
+            None
+        }
+    }
     pub fn with_capacity(low: NonZeroUsize, med: NonZeroUsize, high: NonZeroUsize) -> TieredCache {
         if low < med || med < high {
             warn!("Inverted capacities for caches. This may inefficiently take up memory.");
@@ -130,11 +140,11 @@ impl TieredCache {
                     self.promote(entity)?;
                     changed = true;
                 }
-            } else if self.med.len() < med_cap {
-                if let Some((entity, _)) = low_snapshot.into_iter().min_by(|a, b| a.1.cmp(&b.1)) {
-                    self.promote(entity)?;
-                    changed = true;
-                }
+            } else if self.med.len() < med_cap
+                && let Some((entity, _)) = low_snapshot.into_iter().min_by(|a, b| a.1.cmp(&b.1))
+            {
+                self.promote(entity)?;
+                changed = true;
             }
 
             if !changed {
@@ -197,7 +207,19 @@ pub struct AccessToken {
     touched_freq: AtomicU32,
 }
 
+impl Default for AccessToken {
+    fn default() -> Self {
+        Self {
+            last_touched: ArcSwap::new(Arc::new(Instant::now())),
+            touched_freq: AtomicU32::new(1),
+        }
+    }
+}
+
 impl AccessToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn increment(&self) {
         self.last_touched.store(Arc::new(Instant::now()));
         self.touched_freq

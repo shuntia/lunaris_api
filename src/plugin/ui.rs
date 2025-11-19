@@ -4,7 +4,7 @@ use std::{
 };
 
 use arc_swap::{ArcSwap, DefaultStrategy, Guard};
-use bevy_ecs::resource::Resource;
+use lunaris_ecs::{bevy_ecs, Resource};
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// UI data wrapper that hides the backing storage choice.

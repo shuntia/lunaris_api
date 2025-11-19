@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 arc-swap = "1.7.1"
-bevy_ecs.workspace = true
+lunaris_ecs = { path = "../lunaris_ecs" }
 egui.workspace = true
 fluent.workspace = true
 futures.workspace = true
@@ -26,5 +26,7 @@ tracing.workspace=true
 dashmap = "6.1.0"
 zstd = "0.13.3"
 qoi = "0.4.1"
-lz4_flex = "0.11.5"
+lz4_flex = "0.12.0"
+bytes = "1.10.1"
+crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 

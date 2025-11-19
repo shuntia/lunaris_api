@@ -3,6 +3,7 @@
 #![deny(clippy::perf)]
 #![deny(clippy::style)]
 
+pub mod bridge;
 pub mod consts;
 pub mod plugin;
 pub mod prelude;

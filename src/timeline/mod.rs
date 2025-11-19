@@ -1,4 +1,4 @@
-use bevy_ecs::component::Component;
+use lunaris_ecs::{bevy_ecs, Component};
 
 pub mod elements;
 

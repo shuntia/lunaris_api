@@ -1,8 +1,7 @@
-use std::{
-    any::Any,
-    sync::{Arc, mpsc},
-};
+use std::any::Any;
 
+use bytes::Bytes;
+use crossbeam::channel::bounded;
 use wgpu::{
     BufferDescriptor, BufferUsages, COPY_BYTES_PER_ROW_ALIGNMENT, CommandEncoderDescriptor, Device,
     Extent3d, MapMode, PollType, Queue, TexelCopyBufferInfo, TexelCopyBufferLayout, Texture,
@@ -38,13 +37,14 @@ impl PixelFormat {
         }
     }
 
-    #[inline]
-    pub const fn from_wgpu(format: TextureFormat) -> Option<Self> {
+    pub fn from_wgpu(format: TextureFormat) -> Result<Self> {
         match format {
-            TextureFormat::Rgba8Unorm => Some(Self::Rgba8Unorm),
-            TextureFormat::Rgba8UnormSrgb => Some(Self::Rgba8UnormSrgb),
-            TextureFormat::R8Unorm => Some(Self::Gray8),
-            _ => None,
+            TextureFormat::Rgba8Unorm => Ok(Self::Rgba8Unorm),
+            TextureFormat::Rgba8UnormSrgb => Ok(Self::Rgba8UnormSrgb),
+            TextureFormat::R8Unorm => Ok(Self::Gray8),
+            unsupported => Err(LunarisError::Invalid {
+                f: format!("{unsupported:?}"),
+            }),
         }
     }
 }
@@ -55,7 +55,7 @@ pub struct RawImage {
     width: u32,
     height: u32,
     format: PixelFormat,
-    data: Arc<[u8]>,
+    data: Bytes,
 }
 
 impl RawImage {
@@ -64,9 +64,9 @@ impl RawImage {
         format: PixelFormat,
         width: u32,
         height: u32,
-        bytes: impl Into<Vec<u8>>,
+        bytes: impl Into<Bytes>,
     ) -> Result<Self> {
-        let bytes = bytes.into();
+        let bytes: Bytes = bytes.into();
         let expected = width as usize * height as usize * format.bytes_per_pixel();
         if bytes.len() != expected {
             return Err(LunarisError::InvalidArgument {
@@ -86,17 +86,17 @@ impl RawImage {
             width,
             height,
             format,
-            data: Arc::from(bytes.into_boxed_slice()),
+            data: bytes,
         })
     }
 
     /// Convenience constructor for linear RGBA8 images.
-    pub fn from_rgba8(width: u32, height: u32, bytes: impl Into<Vec<u8>>) -> Result<Self> {
+    pub fn from_rgba8(width: u32, height: u32, bytes: impl Into<Bytes>) -> Result<Self> {
         Self::from_bytes(PixelFormat::Rgba8Unorm, width, height, bytes)
     }
 
     /// Convenience constructor for sRGB RGBA8 images.
-    pub fn from_rgba8_srgb(width: u32, height: u32, bytes: impl Into<Vec<u8>>) -> Result<Self> {
+    pub fn from_rgba8_srgb(width: u32, height: u32, bytes: impl Into<Bytes>) -> Result<Self> {
         Self::from_bytes(PixelFormat::Rgba8UnormSrgb, width, height, bytes)
     }
 
@@ -107,7 +107,7 @@ impl RawImage {
             width,
             height,
             format,
-            data: Arc::from(vec![0; len].into_boxed_slice()),
+            data: Bytes::from(vec![0; len]),
         }
     }
 
@@ -151,7 +151,7 @@ impl RawImage {
         &self.data
     }
 
-    pub fn into_bytes(self) -> Arc<[u8]> {
+    pub fn into_bytes(self) -> Bytes {
         self.data
     }
 
@@ -224,7 +224,7 @@ impl RawImage {
             width: new_width,
             height: new_height,
             format: self.format,
-            data: Arc::from(out.into_boxed_slice()),
+            data: Bytes::from(out.into_boxed_slice()),
         }
     }
 
@@ -343,7 +343,8 @@ impl CompressedImage {
     }
 }
 
-fn read_texture_into_raw(texture: &Texture) -> RawImage {
+/// Reads in-VRAM memory into CPU memory.
+fn read_texture_into_raw(texture: &Texture) -> Result<RawImage> {
     assert_eq!(
         texture.dimension(),
         TextureDimension::D2,
@@ -355,29 +356,31 @@ fn read_texture_into_raw(texture: &Texture) -> RawImage {
     );
 
     let size = texture.size();
-    let format = PixelFormat::from_wgpu(texture.format())
-        .expect("unsupported texture format for RawImage conversion");
+    let format = PixelFormat::from_wgpu(texture.format())?;
 
     if size.width == 0 || size.height == 0 {
-        return RawImage::zeroed(format, size.width, size.height);
+        return Ok(RawImage::zeroed(format, size.width, size.height));
     }
 
     let bytes_per_pixel = format.bytes_per_pixel();
-    let bytes_per_row = bytes_per_pixel
-        .checked_mul(size.width as usize)
-        .expect("row byte count overflow");
+    let bytes_per_row =
+        bytes_per_pixel
+            .checked_mul(size.width as usize)
+            .ok_or(LunarisError::Invalid {
+                f: "Image too large.".into(),
+            })?;
     let alignment = COPY_BYTES_PER_ROW_ALIGNMENT as usize;
     let padded_bytes_per_row = if bytes_per_row == 0 {
         alignment
     } else {
-        ((bytes_per_row + alignment - 1) / alignment) * alignment
+        bytes_per_row.div_ceil(alignment) * alignment
     };
     let padded_bytes_per_row_u32 =
         u32::try_from(padded_bytes_per_row).expect("row stride exceeds u32::MAX");
 
     let buffer_size = padded_bytes_per_row
         .checked_mul(size.height as usize)
-        .expect("buffer size overflow");
+        .ok_or(LunarisError::OutOfMemory)?;
     let buffer = super::device().create_buffer(&BufferDescriptor {
         label: Some("RawImage staging buffer"),
         size: buffer_size as u64,
@@ -405,16 +408,16 @@ fn read_texture_into_raw(texture: &Texture) -> RawImage {
         },
     );
 
-    super::queue().submit([encoder.finish()]);
+    let submission_index = super::queue().submit([encoder.finish()]);
 
     let buffer_slice = buffer.slice(..);
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = bounded(1);
     buffer_slice.map_async(MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
 
     super::device()
-        .poll(PollType::Wait)
+        .poll(PollType::Wait { submission_index: Some(submission_index), timeout: None })
         .expect("failed to poll device for texture readback");
     receiver
         .recv()
@@ -431,7 +434,6 @@ fn read_texture_into_raw(texture: &Texture) -> RawImage {
     buffer.unmap();
 
     RawImage::from_bytes(format, size.width, size.height, pixels)
-        .expect("texture readback produced invalid data")
 }
 
 impl From<RawImage> for CompressedImage {
@@ -497,13 +499,13 @@ impl From<RawImage> for Texture {
 
 impl From<&Texture> for RawImage {
     fn from(texture: &Texture) -> Self {
-        read_texture_into_raw(texture)
+        read_texture_into_raw(texture).expect("Failed to read texture into raw image")
     }
 }
 
 impl From<Texture> for RawImage {
     fn from(texture: Texture) -> Self {
-        read_texture_into_raw(&texture)
+        read_texture_into_raw(&texture).expect("Failed to read texture into raw image")
     }
 }
 

@@ -114,6 +114,9 @@ pub enum LunarisError {
         b: (usize, usize),
     },
 
+    #[error("Tried to load invalid resource:{f}")]
+    Invalid { f: String },
+
     /// Took too much time to render.
     #[error("Render timeout during: {stage}")]
     RenderTimeout { stage: &'static str },

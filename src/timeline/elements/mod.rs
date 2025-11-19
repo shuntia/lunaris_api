@@ -1,8 +1,14 @@
-use std::{any::Any, collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    any::Any,
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use crate::{render::RawImage, timeline::TimelineSpan, util::error::Result};
 
-use bevy_ecs::{component::Component, entity::Entity};
+use lunaris_ecs::{bevy_ecs, Component, Entity};
 
 #[derive(Component, Debug)]
 pub struct TimelineElement {
@@ -54,11 +60,38 @@ pub struct Renderable {
 pub enum Property {
     String(String),
     Integer(u64),
-    Curve(Vec<u64>),
+    Float(f64),
+    Entity(Entity),
+    Dynamic(DynamicProperty),
+    Path(PathBuf),
+    Custom(Arc<dyn Any + Send + Sync>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DynamicProperty {
+    timestamp: u64,
+    inner: Box<Property>,
+}
+
+impl Deref for DynamicProperty {
+    type Target = Property;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for DynamicProperty {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+pub enum SizedProperty {
+    String(String),
+    Integer(u64),
     Float(f64),
     Entity(Entity),
     Path(PathBuf),
-    Custom(Arc<dyn Any + Send + Sync>),
 }
 
 impl Property {
@@ -66,18 +99,19 @@ impl Property {
         match &self {
             Self::String(_) => "String",
             Self::Integer(_) => "Integer",
-            Self::Curve(_) => "Curve",
             Self::Float(_) => "Float",
             Self::Entity(_) => "Entity",
+            Self::Dynamic(content) => content.get_variant_name(),
             Self::Path(_) => "Path",
             Self::Custom(_) => "Custom",
         }
     }
+
     pub fn custom<T: Any + Send + Sync>(value: T) -> Self {
         Self::Custom(Arc::new(value))
     }
 
-    pub fn as_custom<T: Any + Send + Sync>(&self) -> Option<&T> {
+    pub fn as_custom<T: Any>(&self) -> Option<&T> {
         match self {
             Self::Custom(inner) => inner.downcast_ref::<T>(),
             _ => None,
@@ -90,10 +124,10 @@ impl PartialEq for Property {
         match (self, other) {
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Integer(a), Self::Integer(b)) => a == b,
-            (Self::Curve(a), Self::Curve(b)) => a == b,
             (Self::Float(a), Self::Float(b)) => a == b,
             (Self::Entity(a), Self::Entity(b)) => a == b,
             (Self::Path(a), Self::Path(b)) => a == b,
+            (Self::Dynamic(a), Self::Dynamic(b)) => a == b,
             (Self::Custom(a), Self::Custom(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }

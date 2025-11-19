@@ -206,6 +206,7 @@ impl DerefMut for JobHandle {
         &mut self.oneshot
     }
 }
+#[derive(Clone)]
 pub struct OrchestratorProfile {
     pub immediate: u64,
     pub normal: u64,
