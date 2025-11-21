@@ -1,6 +1,6 @@
 [package]
 name = "lunaris_api"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 description = "The API for lunaris. Reservation for lunaris."
 readme = "README.md"
@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 arc-swap = "1.7.1"
-lunaris_ecs = { path = "../lunaris_ecs" }
+lunaris_ecs = { path = "../lunaris_ecs", version = "0.1.0" }
 egui.workspace = true
 fluent.workspace = true
 futures.workspace = true

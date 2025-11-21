@@ -4,7 +4,7 @@ use std::{
 };
 
 use arc_swap::{ArcSwap, DefaultStrategy, Guard};
-use lunaris_ecs::{Resource, bevy_ecs};
+use lunaris_ecs::Resource;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// UI data wrapper that hides the backing storage choice.
@@ -12,7 +12,7 @@ use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 #[derive(Resource)]
 pub struct UiContext<S>
 where
-    S: UiContextStorage,
+    S: UiContextStorage + 'static,
 {
     storage: Arc<S>,
 }
@@ -100,10 +100,10 @@ pub trait UiContextStorage: Send + Sync {
     type State: Send + Sync;
     type WriteGuard<'a>: Deref<Target = Self::State> + DerefMut<Target = Self::State> + 'a
     where
-        Self: 'a;
+         Self: 'a;
     type ReadGuard<'a>: Deref<Target = Self::State> + 'a
     where
-        Self: 'a;
+         Self: 'a;
     fn write(&self) -> Self::WriteGuard<'_>;
     fn read(&self) -> Self::ReadGuard<'_>;
 }

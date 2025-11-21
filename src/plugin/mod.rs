@@ -7,9 +7,10 @@ use serde::{Deserialize, Serialize};
 use std::{any::Any, sync::Arc};
 
 use crate::{
+    prelude::LunarisError,
     render::RawImage,
     request::DynOrchestrator,
-    timeline::elements::{Properties, Property},
+    types::{Properties, Property},
     util::error::Result,
 };
 
@@ -43,10 +44,7 @@ impl<T: Any + Send + Sync + 'static> UiState for T {
 // --- Core Plugin Traits ---
 
 // Object-safe plugin surface that the host can store behind dyn.
-pub trait Plugin: Send + Sync {
-    fn new() -> Self
-    where
-        Self: Sized;
+pub trait DynPlugin: Send + Sync {
     fn name(&self) -> &'static str;
     fn init(&self, ctx: PluginContext<'_>) -> Result;
     fn add_schedule(&self, schedule: &mut Schedule) -> Result;
@@ -54,16 +52,35 @@ pub trait Plugin: Send + Sync {
     fn report(&self, ctx: PluginContext<'_>) -> PluginReport;
     fn shutdown(&mut self, ctx: PluginContext<'_>);
     fn reset(&mut self, ctx: PluginContext<'_>);
+    fn register_menu(&self, menu_bar: &mut MenuBar);
+}
+
+pub trait Plugin: Send + Sync {
+    fn new() -> Self
+    where
+        Self: Sized;
+    fn init(&self, _ctx: PluginContext<'_>) -> Result {
+        Ok(())
+    }
+    fn add_schedule(&self, _schedule: &mut Schedule) -> Result {
+        Ok(())
+    }
+    fn update_world(&mut self, _ctx: PluginContext<'_>) -> Result {
+        Ok(())
+    }
+    fn report(&self, _ctx: PluginContext<'_>) -> PluginReport {
+        PluginReport::Operational
+    }
+    fn shutdown(&mut self, _ctx: PluginContext<'_>) {}
+    fn reset(&mut self, _ctx: PluginContext<'_>) {}
     #[allow(unused)]
     fn register_menu(&self, _menu_bar: &mut MenuBar) {}
 }
 
 pub trait SystemPlugin: System {
-    type UndoTok: Event + Serialize + for<'de> Deserialize<'de>;
+    type UndoTok: lunaris_ecs::bevy_ecs::event::Event + Serialize + for<'de> Deserialize<'de>;
 
-    fn undo_system(&mut self) -> Option<BoxedSystem<(), ()>> {
-        None
-    }
+    fn undo_system(&mut self) -> Option<BoxedSystem<(), ()>>;
 }
 
 pub struct RenderJob {
@@ -100,7 +117,15 @@ pub trait Renderer: Plugin {
     fn schedule_render(&self, job: RenderJob) -> Result<RenderTask>;
 }
 
+pub trait DynRenderer: DynPlugin {
+    fn schedule_render(&self, job: RenderJob) -> Result<RenderTask>;
+}
+
 pub trait Gui: Plugin {
+    fn ui(&self, ui: &mut Ui, ctx: PluginContext<'_>);
+}
+
+pub trait DynGui: DynPlugin {
     fn ui(&self, ui: &mut Ui, ctx: PluginContext<'_>);
 }
 
@@ -124,17 +149,17 @@ pub struct PluginContext<'a> {
 // Registration records collected via `inventory`.
 pub struct PluginRegistration {
     pub id: &'static str,
-    pub build: fn() -> Box<dyn Plugin>,
+    pub build: fn() -> Box<dyn DynPlugin>,
 }
 
 pub struct GuiRegistration {
     pub name: &'static str,
-    pub build: fn() -> Box<dyn Gui>,
+    pub build: fn() -> Box<dyn DynGui>,
 }
 
 pub struct RendererRegistration {
     pub name: &'static str,
-    pub build: fn() -> Box<dyn Renderer>,
+    pub build: fn() -> Box<dyn DynRenderer>,
 }
 
 inventory::collect!(PluginRegistration);
@@ -167,29 +192,18 @@ macro_rules! submit_raw {
 #[doc(hidden)]
 pub struct __ArcPluginAdapter<T> {
     inner: std::sync::Arc<parking_lot::RwLock<T>>,
+    name: &'static str,
 }
 
 impl<T> __ArcPluginAdapter<T> {
-    pub fn new_with_shared(inner: std::sync::Arc<parking_lot::RwLock<T>>) -> Self {
-        Self { inner }
+    pub fn new_with_shared(inner: std::sync::Arc<parking_lot::RwLock<T>>, name: &'static str) -> Self {
+        Self { inner, name }
     }
 }
 
-impl<T: Plugin> Plugin for __ArcPluginAdapter<T> {
-    fn new() -> Self
-    where
-        Self: Sized,
-    {
-        unsafe {
-            debug_unreachable!("__ArcPluginAdapter is constructed via export_plugin! macro");
-        }
-    }
+impl<T: Plugin> DynPlugin for __ArcPluginAdapter<T> {
     fn name(&self) -> &'static str {
-        if let Some(guard) = self.inner.try_read() {
-            Plugin::name(&*guard)
-        } else {
-            "<locked>"
-        }
+        self.name
     }
     fn init(&self, ctx: PluginContext<'_>) -> Result {
         let guard = self.inner.read();
@@ -231,29 +245,18 @@ impl<T: Plugin> Plugin for __ArcPluginAdapter<T> {
 #[doc(hidden)]
 pub struct __ArcPluginGuiAdapter<T> {
     inner: std::sync::Arc<parking_lot::RwLock<T>>,
+    name: &'static str,
 }
 
 impl<T> __ArcPluginGuiAdapter<T> {
-    pub fn new_with_shared(inner: std::sync::Arc<parking_lot::RwLock<T>>) -> Self {
-        Self { inner }
+    pub fn new_with_shared(inner: std::sync::Arc<parking_lot::RwLock<T>>, name: &'static str) -> Self {
+        Self { inner, name }
     }
 }
 
-impl<T: Plugin> Plugin for __ArcPluginGuiAdapter<T> {
-    fn new() -> Self
-    where
-        Self: Sized,
-    {
-        unsafe {
-            debug_unreachable!("__ArcPluginGuiAdapter is constructed via export_plugin! macro")
-        };
-    }
+impl<T: Plugin> DynPlugin for __ArcPluginGuiAdapter<T> {
     fn name(&self) -> &'static str {
-        if let Some(guard) = self.inner.try_read() {
-            Plugin::name(&*guard)
-        } else {
-            "<locked>"
-        }
+        self.name
     }
     fn init(&self, ctx: PluginContext<'_>) -> Result {
         let guard = self.inner.read();
@@ -292,7 +295,7 @@ impl<T: Plugin> Plugin for __ArcPluginGuiAdapter<T> {
     }
 }
 
-impl<T: Plugin + Gui> Gui for __ArcPluginGuiAdapter<T> {
+impl<T: Plugin + Gui> DynGui for __ArcPluginGuiAdapter<T> {
     fn ui(&self, ui: &mut Ui, ctx: PluginContext<'_>) {
         if let Some(guard) = self.inner.try_read() {
             Gui::ui(&*guard, ui, ctx)
@@ -313,13 +316,7 @@ impl<T> __GuiTypeEraser<T> {
     }
 }
 
-impl<T: Plugin> Plugin for __GuiTypeEraser<T> {
-    fn new() -> Self
-    where
-        Self: Sized,
-    {
-        unsafe { debug_unreachable!("__GuiTypeEraser is constructed via export_plugin! macro") }
-    }
+impl<T: Plugin> DynPlugin for __GuiTypeEraser<T> {
     fn name(&self) -> &'static str {
         self.inner.name()
     }
@@ -346,7 +343,7 @@ impl<T: Plugin> Plugin for __GuiTypeEraser<T> {
     }
 }
 
-impl<T: Plugin + Gui> Gui for __GuiTypeEraser<T> {
+impl<T: Plugin + Gui> DynGui for __GuiTypeEraser<T> {
     fn ui(&self, ui: &mut Ui, ctx: PluginContext<'_>) {
         if let Some(guard) = self.inner.inner.try_read() {
             Gui::ui(&*guard, ui, ctx)
@@ -357,32 +354,18 @@ impl<T: Plugin + Gui> Gui for __GuiTypeEraser<T> {
 #[doc(hidden)]
 pub struct __ArcPluginRendererAdapter<T> {
     inner: std::sync::Arc<parking_lot::RwLock<T>>,
+    name: &'static str,
 }
 
 impl<T> __ArcPluginRendererAdapter<T> {
-    pub fn new_with_shared(inner: std::sync::Arc<parking_lot::RwLock<T>>) -> Self {
-        Self { inner }
+    pub fn new_with_shared(inner: std::sync::Arc<parking_lot::RwLock<T>>, name: &'static str) -> Self {
+        Self { inner, name }
     }
 }
 
-impl<T: Plugin + Renderer> Plugin for __ArcPluginRendererAdapter<T> {
-    fn new() -> Self
-    where
-        Self: Sized,
-    {
-        unsafe {
-            debug_unreachable!(
-                "__ArcPluginRendererAdapter is constructed via export_plugin! macro"
-            );
-        }
-    }
-
+impl<T: Plugin + Renderer> DynPlugin for __ArcPluginRendererAdapter<T> {
     fn name(&self) -> &'static str {
-        if let Some(guard) = self.inner.try_read() {
-            Plugin::name(&*guard)
-        } else {
-            "<locked>"
-        }
+        self.name
     }
 
     fn init(&self, ctx: PluginContext<'_>) -> Result {
@@ -394,7 +377,9 @@ impl<T: Plugin + Renderer> Plugin for __ArcPluginRendererAdapter<T> {
         if let Some(guard) = self.inner.try_read() {
             Plugin::add_schedule(&*guard, schedule)
         } else {
-            Ok(())
+            Err(LunarisError::Busy {
+                resource: "<locked>".into(),
+            })
         }
     }
 
@@ -428,7 +413,7 @@ impl<T: Plugin + Renderer> Plugin for __ArcPluginRendererAdapter<T> {
     }
 }
 
-impl<T: Plugin + Renderer> Renderer for __ArcPluginRendererAdapter<T> {
+impl<T: Plugin + Renderer> DynRenderer for __ArcPluginRendererAdapter<T> {
     fn schedule_render(&self, job: RenderJob) -> Result<RenderTask> {
         let guard = self.inner.read();
         Renderer::schedule_render(&*guard, job)
@@ -461,14 +446,17 @@ macro_rules! __map_feat_str {
 /// Usage:
 ///   export_plugin!(MyType);                          // plugin only
 ///   export_plugin!(MyType, [Gui]);                   // plugin + Gui
-///   export_plugin!(MyType, id: "com.example.plugin");   // custom ID
-///   export_plugin!(MyType, id: "com.example.plugin", [Gui]);    // custom ID + features
+///   export_plugin!(MyType, id: "example");   // custom ID
+///   export_plugin!(MyType, id: "example", [Gui]);    // custom ID + features
 #[macro_export]
 macro_rules! export_plugin {
     ($ty:ty) => {
-        $crate::export_plugin!($ty, id: stringify!($ty), []);
+        $crate::export_plugin!($ty, id: stringify!($ty), name: stringify!($ty), []);
     };
     ($ty:ty, id: $id:expr, [ $($feat:ident),* $(,)? ]) => {
+        $crate::export_plugin!($ty, id: $id, name: $id, [ $($feat),* ]);
+    };
+    ($ty:ty, id: $id:expr, name: $name:expr, [ $($feat:ident),* $(,)? ]) => {
         // Shared instance initializer
         fn __lunaris_shared_instance() -> std::sync::Arc<$crate::parking_lot::RwLock<$ty>> {
             static INSTANCE: std::sync::OnceLock<std::sync::Arc<$crate::parking_lot::RwLock<$ty>>> =
@@ -486,61 +474,64 @@ macro_rules! export_plugin {
         $crate::submit_raw! {
             $crate::plugin::PluginRegistration {
                 id: $id,
-                build: || Box::new($crate::plugin::__ArcPluginAdapter::<$ty>::new_with_shared(__lunaris_shared_instance())) ,
+                build: || Box::new($crate::plugin::__ArcPluginAdapter::<$ty>::new_with_shared(__lunaris_shared_instance(), $name)) ,
             }
         }
         $(
-            $crate::__private_export_feature!($ty, $id, __lunaris_shared_instance, $feat);
+            $crate::__private_export_feature!($ty, $id, $name, __lunaris_shared_instance, $feat);
         )*
     };
     ($ty:ty, [ $($feat:ident),* $(,)? ]) => {
-        $crate::export_plugin!($ty, id: stringify!($ty), [ $($feat),* ]);
+        $crate::export_plugin!($ty, id: stringify!($ty), name: stringify!($ty), [ $($feat),* ]);
     };
     ($ty:ty, id: $id:expr) => {
-        $crate::export_plugin!($ty, id: $id, []);
+        $crate::export_plugin!($ty, id: $id, name: $id, []);
+    };
+    ($ty:ty, id: $id:expr, name: $name:expr) => {
+        $crate::export_plugin!($ty, id: $id, name: $name, []);
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __private_export_feature {
-    ($ty:ty, $name:expr, $shared:path, Gui) => {
+    ($ty:ty, $id:expr, $name:expr, $shared:path, Gui) => {
         const _: fn() = || {
             fn assert_impl<T: $crate::plugin::Gui>() {}
             let _ = assert_impl::<$ty>;
         };
         $crate::submit_raw! {
             $crate::plugin::GuiRegistration {
-                name: $name,
-                build: || Box::new($crate::plugin::__GuiTypeEraser::new($crate::plugin::__ArcPluginGuiAdapter::<$ty>::new_with_shared($shared()))),
+                name: $id,
+                build: || Box::new($crate::plugin::__GuiTypeEraser::new($crate::plugin::__ArcPluginGuiAdapter::<$ty>::new_with_shared($shared(), $name))),
             }
         }
     };
-    ($ty:ty, $name:expr, $shared:path, Skeleton) => {
+    ($ty:ty, $id:expr, $name:expr, $shared:path, Skeleton) => {
         const _: fn() = || {
             fn assert_impl<T: $crate::plugin::Gui>() {}
             let _ = assert_impl::<$ty>;
         };
         $crate::submit_raw! {
             $crate::plugin::GuiRegistration {
-                name: $name,
-                build: || Box::new($crate::plugin::__GuiTypeEraser::new($crate::plugin::__ArcPluginGuiAdapter::<$ty>::new_with_shared($shared()))),
+                name: $id,
+                build: || Box::new($crate::plugin::__GuiTypeEraser::new($crate::plugin::__ArcPluginGuiAdapter::<$ty>::new_with_shared($shared(), $name))),
             }
         }
     };
-    ($ty:ty, $name:expr, $shared:path, Renderer) => {
+    ($ty:ty, $id:expr, $name:expr, $shared:path, Renderer) => {
         const _: fn() = || {
             fn assert_impl<T: $crate::plugin::Renderer>() {}
             let _ = assert_impl::<$ty>;
         };
         $crate::submit_raw! {
             $crate::plugin::RendererRegistration {
-                name: $name,
-                build: || Box::new($crate::plugin::__ArcPluginRendererAdapter::<$ty>::new_with_shared($shared())),
+                name: $id,
+                build: || Box::new($crate::plugin::__ArcPluginRendererAdapter::<$ty>::new_with_shared($shared(), $name)),
             }
         }
     };
-    ($ty:ty, $name:expr, $shared:path, $other:ident) => {
+    ($ty:ty, $id:expr, $name:expr, $shared:path, $other:ident) => {
         compile_error!(concat!(
             "Unknown plugin feature in export_plugin!: ",
             stringify!($other),

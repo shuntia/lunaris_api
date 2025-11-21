@@ -6,21 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{render::RawImage, timeline::TimelineSpan, util::error::Result};
-
-use lunaris_ecs::{Component, Entity, bevy_ecs};
-
-#[derive(Component, Debug)]
-pub struct TimelineElement {
-    /// Track number of Timeline Element, or in other words, the Z-index.
-    pub track_num: u64,
-    pub position: TimelineSpan,
-}
-
-#[derive(Component, Debug)]
-pub struct BindTo {
-    pub id: Entity,
-}
+use lunaris_ecs::prelude::*;
 
 #[derive(Component, Default, Debug, Clone)]
 pub struct Properties {
@@ -49,11 +35,6 @@ impl From<Properties> for HashMap<String, Property> {
     fn from(val: Properties) -> Self {
         val.properties
     }
-}
-
-#[derive(Component, Debug)]
-pub struct Renderable {
-    pub render_result: Result<RawImage>,
 }
 
 #[derive(Clone, Debug)]
